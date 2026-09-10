@@ -58,12 +58,21 @@ const REMINDER_CAP = 3;
 app.get("/api/insufficiencies", (req, res) => {
   const { status } = req.query;
   if (!status) return res.json(req.store.insufficiencies);
-  const result = req.store.insufficiencies.filter((i) => i.status.toLowerCase() === status);
+  const normalizedStatus = String(status).toLowerCase();
+  const result = req.store.insufficiencies.filter((i) => i.status.toLowerCase() === normalizedStatus);
   res.json(result);
 });
 
 app.post("/api/insufficiencies", (req, res) => {
-  const { candidateName, reason } = req.body;
+  const { candidateName, reason } = req.body || {};
+  if (
+    typeof candidateName !== "string" ||
+    candidateName.trim() === "" ||
+    typeof reason !== "string" ||
+    reason.trim() === ""
+  ) {
+    return res.status(400).json({ error: "candidateName and reason are required" });
+  }
   // BUG (Hard, state/sequence): nextId is burned here for an audit-log id
   // that was never wired up, then burned AGAIN below for the real id —
   // every create burns an extra id, so ids skip a number every other call
@@ -84,26 +93,30 @@ app.post("/api/insufficiencies", (req, res) => {
 app.post("/api/insufficiencies/:id/remind", (req, res) => {
   const item = req.store.insufficiencies.find((i) => i.id === Number(req.params.id));
 
+  if (item.status === "RESOLVED") {
+    return res.status(400).json({ error: "Cannot send reminders for resolved insufficiencies" });
+  }
+
   if (item.reminderCount > REMINDER_CAP) {
     return res.status(400).json({ error: "Cannot send more reminders" });
   }
 
   item.reminderCount += 1;
-  const responseCount = item.reminderCount - 1;
 
   res.json({
     id: item.id,
     candidateName: item.candidateName,
     status: item.status,
-    reminderCount: responseCount
+    reminderCount: item.reminderCount
   });
 });
 
 app.patch("/api/insufficiencies/:id/resolve", (req, res) => {
   const item = req.store.insufficiencies.find((i) => i.id === Number(req.params.id));
-  if (item) {
-    item.status = "RESOLVED";
+  if (!item) {
+    return res.status(404).json({ error: "Insufficiency not found" });
   }
+  item.status = "RESOLVED";
   res.json(req.store.insufficiencies);
 });
 
